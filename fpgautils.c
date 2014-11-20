@@ -315,10 +315,10 @@ void termios_debug(const char *devpath, struct termios *my_termios, const char *
 #endif
 #endif
 
-int serial_open(const char *devpath, unsigned long baud, signed short timeout, bool purge)
+int serial_open_ex(const char *devpath, unsigned long baud, signed short timeout, signed short __maybe_unused minbytes, bool purge, bool __maybe_unused win32overlapped)
 {
 #ifdef WIN32
-	HANDLE hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, (win32overlapped) ? FILE_FLAG_OVERLAPPED : 0, NULL);
 	if (unlikely(hSerial == INVALID_HANDLE_VALUE))
 	{
 		DWORD e = GetLastError();
@@ -421,7 +421,7 @@ int serial_open(const char *devpath, unsigned long baud, signed short timeout, b
 
 	// Code must specify a valid timeout value (0 means don't timeout)
 	my_termios.c_cc[VTIME] = (cc_t)timeout;
-	my_termios.c_cc[VMIN] = 0;
+	my_termios.c_cc[VMIN] = (cc_t)minbytes;
 
 #ifdef TERMIOS_DEBUG
 	termios_debug(devpath, &my_termios, "settings");
