@@ -54,6 +54,7 @@ char *curly = ":D";
 #include "compat.h"
 #include "miner.h"
 #include "bench_block.h"
+#include "scrypt.h"
 #ifdef USE_USBUTILS
 #include "usbutils.h"
 #endif
@@ -102,6 +103,14 @@ char *curly = ":D";
 
 #if defined(USE_ANT_S1) || defined(USE_ANT_S2)
 #include "driver-bitmain.h"
+#endif
+
+#ifdef USE_GRIDSEED
+#include "driver-gridseed.h"
+#endif
+
+#ifdef USE_ZEUS
+#include "driver-zeus.h"
 #endif
 
 #if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_MODMINER)
@@ -169,6 +178,10 @@ time_t last_getwork;
 
 #if defined(USE_USBUTILS)
 int nDevs;
+#endif
+bool opt_sha256;
+#ifdef USE_SCRYPT
+bool opt_scrypt;
 #endif
 bool opt_restart = true;
 bool opt_nogpu;
@@ -257,6 +270,18 @@ char *opt_bitmain_dev;
 #endif
 #ifdef USE_HASHFAST
 static char *opt_set_hfa_fan;
+#endif
+#ifdef USE_GRIDSEED
+char *opt_gridseed_options = NULL;
+char *opt_gridseed_freq = NULL;
+char *opt_gridseed_override = NULL;
+#endif
+#ifdef USE_ZEUS
+bool opt_zeus_debug;
+int opt_zeus_chips_count;
+int opt_zeus_chip_clk;
+bool opt_zeus_nocheck_golden;
+char *opt_zeus_options;
 #endif
 static char *opt_set_null;
 #ifdef USE_MINION
@@ -779,6 +804,11 @@ static char *set_int_1_to_10(const char *arg, int *i)
 static char __maybe_unused *set_int_0_to_4(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 4);
+}
+
+static char *set_int_1_to_1024(const char *arg, int *i)
+{
+	return set_int_range(arg, i, 1, 1024);
 }
 
 #ifdef USE_FPGA_SERIAL
@@ -1313,6 +1343,17 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--fix-protocol",
 			opt_set_bool, &opt_fix_protocol,
 			"Do not redirect to a different getwork protocol (eg. stratum)"),
+#ifdef USE_GRIDSEED
+	OPT_WITH_ARG("--gridseed-options",
+			opt_set_charp, NULL, &opt_gridseed_options,
+			"Set gridseed options: freq=N[,voltage=1][,led_off=1]"),
+	OPT_WITH_ARG("--gridseed-freq",
+			opt_set_charp, NULL, &opt_gridseed_freq,
+			"Set gridseed frequency per-device: serial=freq[,...]"),
+	OPT_WITH_ARG("--gridseed-override",
+			opt_set_charp, NULL, &opt_gridseed_override,
+			"Set any gridseed option per-device: serial:opt1=val1[,...][;serial=...]"),
+#endif
 #ifdef USE_HASHFAST
 	OPT_WITHOUT_ARG("--hfa-dfu-boot",
 			opt_set_bool, &opt_hfa_dfu_boot,
@@ -1516,6 +1557,14 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_CBARG("--sched-stop",
 		     set_sched_stop, NULL, &opt_set_sched_stop,
 		     "Set a time of day in HH:MM to stop mining (will quit without a start time)"),
+	OPT_WITHOUT_ARG("--sha256",
+		     opt_set_bool, &opt_sha256,
+		     "Use the SHA-256 algorithm for mining"),
+#ifdef USE_SCRYPT
+	OPT_WITHOUT_ARG("--scrypt",
+		     opt_set_bool, &opt_scrypt,
+		     "Use the scrypt algorithm for mining"),
+#endif
 	OPT_WITH_CBARG("--sharelog",
 		     set_sharelog, NULL, &opt_set_sharelog,
 		     "Append share log to file"),
@@ -1575,6 +1624,23 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--worktime",
 			opt_set_bool, &opt_worktime,
 			"Display extra work time debug information"),
+#ifdef USE_ZEUS
+	OPT_WITH_ARG("--zeus-chips",
+			set_int_1_to_1024, NULL, &opt_zeus_chips_count,
+			"Number of Zeus chips per device"),
+	OPT_WITH_ARG("--zeus-clock",
+			opt_set_intval, NULL, &opt_zeus_chip_clk,
+			"Zeus chip clock speed (MHz)"),
+	OPT_WITHOUT_ARG("--zeus-debug",
+			opt_set_bool, &opt_zeus_debug,
+			"Enable extra Zeus driver debugging output in verbose mode"),
+	OPT_WITHOUT_ARG("--zeus-nocheck-golden",
+			opt_set_bool, &opt_zeus_nocheck_golden,
+			"Skip golden nonce verification during initialization"),
+	OPT_WITH_ARG("--zeus-options",
+			opt_set_charp, NULL, &opt_zeus_options,
+			"Set individual Zeus device options: ID,chips,clock[;ID,chips,clock...]"),
+#endif
 	OPT_ENDTABLE
 };
 
@@ -1807,7 +1873,15 @@ static char *opt_verusage_and_exit(const char *extra)
 #ifdef USE_SP30
         "sp30 "
 #endif
-
+#ifdef USE_GRIDSEED
+		"GridSeed "
+#endif
+#ifdef USE_ZEUS
+		"Zeus "
+#endif
+#ifdef USE_SCRYPT
+		"scrypt "
+#endif
 		"mining support.\n"
 		, packagename);
 	printf("%s", opt_usage(opt_argv0, extra));
@@ -2739,8 +2813,8 @@ const char blanks[] = "                                        ";
 
 static void curses_print_devstatus(struct cgpu_info *cgpu, int devno, int count)
 {
-	static int devno_width = 1, dawidth = 1, drwidth = 1, hwwidth = 1, wuwidth = 1;
-	char logline[256], unique_id[12];
+	static int devno_width = 1, uid_width = 4, dawidth = 1, drwidth = 1, hwwidth = 1, wuwidth = 1;
+	char logline[256], unique_id[16];
 	struct timeval now;
 	double dev_runtime, wu;
 	unsigned int devstatlen;
@@ -2770,13 +2844,23 @@ static void curses_print_devstatus(struct cgpu_info *cgpu, int devno, int count)
 	wmove(statuswin,devcursor + count, 0);
 	adj_width(devno, &devno_width);
 	if (cgpu->unique_id) {
-		unique_id[8] = '\0';
-		memcpy(unique_id, blanks, 8);
-		strncpy(unique_id, cgpu->unique_id, 8);
-	} else
-		sprintf(unique_id, "%-8d", cgpu->device_id);
-	cg_wprintw(statuswin, " %*d: %s %-8s: ", devno_width, devno, cgpu->drv->name,
-		   unique_id);
+		if (uid_width < 12 && (int)strlen(cgpu->unique_id) > uid_width)
+			uid_width = MIN(strlen(cgpu->unique_id), 12);	// maximum length 12
+
+		unique_id[4] = '\0';
+		memcpy(unique_id, blanks, 4);				// minimum length 4
+		strncpy(unique_id, cgpu->unique_id, uid_width);
+		unique_id[uid_width] = '\0';
+	} else {
+		adj_width(cgpu->device_id, &uid_width);
+		if (uid_width < 4)
+			uid_width = 4;
+		if (uid_width > 12)
+			uid_width = 12;
+		sprintf(unique_id, "%-*d", uid_width, cgpu->device_id);
+	}
+	cg_wprintw(statuswin, " %*d: %s %-*s: ", devno_width, devno, cgpu->drv->name,
+		   uid_width, unique_id);
 	logline[0] = '\0';
 	cgpu->drv->get_statline_before(logline, sizeof(logline), cgpu);
 	devstatlen = strlen(logline);
@@ -3316,8 +3400,8 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 
 			snprintf(worktime, sizeof(worktime),
 				" <-%08lx.%08lx M:%c D:%1.*f G:%02d:%02d:%02d:%1.3f %s (%1.3f) W:%1.3f (%1.3f) S:%1.3f R:%02d:%02d:%02d",
-				(unsigned long)be32toh(*(uint32_t *)&(work->data[28])),
-				(unsigned long)be32toh(*(uint32_t *)&(work->data[24])),
+				(unsigned long)be32toh(*(uint32_t *)&(work->data[opt_scrypt ? 32 : 28])),
+				(unsigned long)be32toh(*(uint32_t *)&(work->data[opt_scrypt ? 28 : 24])),
 				work->getwork_mode, diffplaces, work->work_difficulty,
 				tm_getwork.tm_hour, tm_getwork.tm_min,
 				tm_getwork.tm_sec, getwork_time, workclone,
@@ -3564,6 +3648,8 @@ static double diff_from_target(void *target)
 	double d64, dcut64;
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	dcut64 = le256todouble(target);
 	if (unlikely(!dcut64))
 		dcut64 = 1;
@@ -4384,6 +4470,8 @@ uint64_t share_diff(const struct work *work)
 	uint64_t ret;
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	s64 = le256todouble(work->hash);
 	if (unlikely(!s64))
 		s64 = 0;
@@ -4416,6 +4504,14 @@ static void regen_hash(struct work *work)
 	flip80(swap32, data32);
 	sha256(swap, 80, hash1);
 	sha256(hash1, 32, (unsigned char *)(work->hash));
+}
+
+static void rebuild_hash(struct work *work)
+{
+	if (opt_scrypt)
+		scrypt_regenhash(work);
+	else
+		regen_hash(work);
 }
 
 static bool cnx_needed(struct pool *pool);
@@ -5063,7 +5159,8 @@ void write_config(FILE *fcfg)
 			     (void *)opt->cb_arg == (void *)set_int_0_to_255 ||
 			     (void *)opt->cb_arg == (void *)set_int_0_to_200 ||
 			     (void *)opt->cb_arg == (void *)set_int_0_to_4 ||
-			     (void *)opt->cb_arg == (void *)set_int_32_to_63)) {
+			     (void *)opt->cb_arg == (void *)set_int_32_to_63 ||
+			     (void *)opt->cb_arg == (void *)set_int_1_to_1024)) {
 				fprintf(fcfg, ",\n\"%s\" : \"%d\"", p+2, *(int *)opt->u.arg);
 				continue;
 			}
@@ -5870,7 +5967,7 @@ static void thread_reportout(struct thr_info *thr)
 static void hashmeter(int thr_id, uint64_t hashes_done)
 {
 	bool showlog = false;
-	double tv_tdiff;
+	double tv_tdiff, mhashes_done = 0.0;
 	time_t now_t;
 	int diff_t;
 
@@ -5903,14 +6000,14 @@ static void hashmeter(int thr_id, uint64_t hashes_done)
 		thr_mhs = (double)hashes_done / device_tdiff / 1000000;
 		applog(LOG_DEBUG, "[thread %d: %"PRIu64" hashes, %.1f mhash/sec]",
 		       thr_id, hashes_done, thr_mhs);
-		hashes_done /= 1000000;
+		mhashes_done = hashes_done / 1000000.0;
 
 		mutex_lock(&hash_lock);
-		cgpu->total_mhashes += hashes_done;
-		decay_time(&cgpu->rolling, hashes_done, device_tdiff, opt_log_interval);
-		decay_time(&cgpu->rolling1, hashes_done, device_tdiff, 60.0);
-		decay_time(&cgpu->rolling5, hashes_done, device_tdiff, 300.0);
-		decay_time(&cgpu->rolling15, hashes_done, device_tdiff, 900.0);
+		cgpu->total_mhashes += mhashes_done;
+		decay_time(&cgpu->rolling, mhashes_done, device_tdiff, opt_log_interval);
+		decay_time(&cgpu->rolling1, mhashes_done, device_tdiff, 60.0);
+		decay_time(&cgpu->rolling5, mhashes_done, device_tdiff, 300.0);
+		decay_time(&cgpu->rolling15, mhashes_done, device_tdiff, 900.0);
 		mutex_unlock(&hash_lock);
 
 		if (want_per_device_stats && showlog) {
@@ -5942,11 +6039,11 @@ static void hashmeter(int thr_id, uint64_t hashes_done)
 	}
 
 	mutex_lock(&hash_lock);
-	total_mhashes_done += hashes_done;
-	decay_time(&total_rolling, hashes_done, tv_tdiff, opt_log_interval);
-	decay_time(&rolling1, hashes_done, tv_tdiff, 60.0);
-	decay_time(&rolling5, hashes_done, tv_tdiff, 300.0);
-	decay_time(&rolling15, hashes_done, tv_tdiff, 900.0);
+	total_mhashes_done += mhashes_done;
+	decay_time(&total_rolling, mhashes_done, tv_tdiff, opt_log_interval);
+	decay_time(&rolling1, mhashes_done, tv_tdiff, 60.0);
+	decay_time(&rolling5, mhashes_done, tv_tdiff, 300.0);
+	decay_time(&rolling15, mhashes_done, tv_tdiff, 900.0);
 	global_hashrate = llround(total_rolling) * 1000000;
 	total_secs = tdiff(&total_tv_end, &total_tv_start);
 	if (showlog) {
@@ -6848,6 +6945,8 @@ void set_target(unsigned char *dest_target, double diff)
 	}
 
 	d64 = truediffone;
+	if (opt_scrypt)
+		d64 *= (double)65536;
 	d64 /= diff;
 
 	dcut64 = d64 / bits192;
@@ -7275,7 +7374,7 @@ static void rebuild_nonce(struct work *work, uint32_t nonce)
 
 	*work_nonce = htole32(nonce);
 
-	regen_hash(work);
+	rebuild_hash(work);
 }
 
 /* For testing a nonce against diff 1 */
@@ -7284,7 +7383,7 @@ bool test_nonce(struct work *work, uint32_t nonce)
 	uint32_t *hash_32 = (uint32_t *)(work->hash + 28);
 
 	rebuild_nonce(work, nonce);
-	return (*hash_32 == 0);
+	return (*hash_32 <= (opt_scrypt ? 0x0000ffffUL : 0));
 }
 
 /* For testing a nonce against an arbitrary diff */
@@ -7293,7 +7392,7 @@ bool test_nonce_diff(struct work *work, uint32_t nonce, double diff)
 	uint64_t *hash64 = (uint64_t *)(work->hash + 24), diff64;
 
 	rebuild_nonce(work, nonce);
-	diff64 = 0x00000000ffff0000ULL;
+	diff64 = opt_scrypt ? 0x0000ffff00000000ULL : 0x00000000ffff0000ULL;
 	diff64 /= diff;
 
 	return (le64toh(*hash64) <= diff64);
@@ -7304,6 +7403,9 @@ static void update_work_stats(struct thr_info *thr, struct work *work)
 	double test_diff = current_diff;
 
 	work->share_diff = share_diff(work);
+
+	if (opt_scrypt)
+		test_diff *= (double)65536;
 
 	if (unlikely(work->share_diff >= test_diff)) {
 		work->block = true;
@@ -9450,8 +9552,14 @@ int main(int argc, char *argv[])
 	if (!config_loaded)
 		load_default_config();
 
+	if (!opt_sha256 && !opt_scrypt)
+		early_quit(1, "Must explicitly specify mining algorithm (--sha256 or --scrypt)");
+
 	if (opt_benchmark || opt_benchfile) {
 		struct pool *pool;
+
+		if (opt_scrypt)
+			early_quit(1, "Cannot use benchmark mode with scrypt");
 
 		pool = add_pool();
 		pool->rpc_url = malloc(255);
@@ -9509,8 +9617,9 @@ int main(int argc, char *argv[])
 	if (want_per_device_stats)
 		opt_log_output = true;
 
+	/* Use a shorter scantime for scrypt */
 	if (opt_scantime < 0)
-		opt_scantime = 60;
+		opt_scantime = opt_scrypt ? 30 : 60;
 
 	total_control_threads = 8;
 	control_thr = calloc(total_control_threads, sizeof(*thr));
@@ -9562,6 +9671,9 @@ int main(int argc, char *argv[])
 	if (!total_devices)
 		early_quit(1, "All devices disabled, cannot mine!");
 #endif
+
+	if (opt_queue == -1)
+		opt_queue = (opt_scrypt) ? total_devices : 9999;
 
 	most_devices = total_devices;
 

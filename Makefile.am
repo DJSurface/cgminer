@@ -25,7 +25,7 @@ bin_PROGRAMS	= cgminer
 cgminer_LDFLAGS	= $(PTHREAD_FLAGS)
 cgminer_LDADD	= $(DLOPEN_FLAGS) @LIBCURL_LIBS@ @JANSSON_LIBS@ @PTHREAD_LIBS@ \
 		  @NCURSES_LIBS@ @PDCURSES_LIBS@ @WS2_LIBS@ \
-		  @LIBUSB_LIBS@ @MM_LIBS@ @RT_LIBS@ \
+		  @LIBUSB_LIBS@ @LIBUDEV_LIBS@ @MM_LIBS@ @RT_LIBS@ \
 		  @MATH_LIBS@ lib/libgnu.a ccan/libccan.a
 
 cgminer_CPPFLAGS += -I$(top_builddir)/lib -I$(top_srcdir)/lib
@@ -46,6 +46,10 @@ cgminer_SOURCES	+= logging.c
 cgminer_SOURCES	+= klist.h klist.c
 
 cgminer_SOURCES	+= noncedup.c
+
+if HAS_SCRYPT
+cgminer_SOURCES += scrypt.c scrypt.h
+endif
 
 if NEED_FPGAUTILS
 cgminer_SOURCES += fpgautils.c fpgautils.h
@@ -154,6 +158,14 @@ if HAS_MODMINER
 cgminer_SOURCES += driver-modminer.c
 bitstreamsdir = $(bindir)/bitstreams
 dist_bitstreams_DATA = $(top_srcdir)/bitstreams/README
+endif
+
+if HAS_GRIDSEED
+cgminer_SOURCES += driver-gridseed.c driver-gridseed.h
+endif
+
+if HAS_ZEUS
+cgminer_SOURCES += driver-zeus.c driver-zeus.h
 endif
 
 if HAS_BLOCKERUPTER

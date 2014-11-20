@@ -247,7 +247,9 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(bab) \
 	DRIVER_ADD_COMMAND(minion) \
 	DRIVER_ADD_COMMAND(sp10) \
-	DRIVER_ADD_COMMAND(sp30)
+	DRIVER_ADD_COMMAND(sp30) \
+	DRIVER_ADD_COMMAND(gridseed) \
+	DRIVER_ADD_COMMAND(zeus)
 
 #define DRIVER_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
 	FPGA_PARSE_COMMANDS(DRIVER_ADD_COMMAND) \
@@ -1055,6 +1057,18 @@ extern cgsem_t usb_resource_sem;
 #ifdef USE_BITFORCE
 extern bool opt_bfl_noncerange;
 #endif
+#ifdef USE_GRIDSEED
+extern char *opt_gridseed_options;
+extern char *opt_gridseed_freq;
+extern char *opt_gridseed_override;
+#endif
+#ifdef USE_ZEUS
+extern bool opt_zeus_debug;
+extern int opt_zeus_chips_count;
+extern int opt_zeus_chip_clk;
+extern bool opt_zeus_nocheck_golden;
+extern char *opt_zeus_options;
+#endif
 extern int swork_id;
 
 #if LOCK_TRACKING
@@ -1136,6 +1150,11 @@ extern bool use_syslog;
 extern bool opt_quiet;
 extern struct thr_info *control_thr;
 extern struct thr_info **mining_thr;
+#ifdef USE_SCRYPT
+extern bool opt_scrypt;
+#else
+#define opt_scrypt (0)
+#endif
 extern double total_secs;
 extern int mining_threads;
 extern int total_devices;
@@ -1521,6 +1540,7 @@ enum api_data_type {
 	API_STRING,
 	API_CONST,
 	API_UINT8,
+	API_SHORT,
 	API_INT16,
 	API_UINT16,
 	API_INT,
@@ -1535,6 +1555,7 @@ enum api_data_type {
 	API_TIMEVAL,
 	API_TIME,
 	API_MHS,
+	API_KHS,
 	API_MHTOTAL,
 	API_TEMP,
 	API_UTILITY,
@@ -1559,6 +1580,7 @@ extern struct api_data *api_add_escape(struct api_data *root, char *name, char *
 extern struct api_data *api_add_string(struct api_data *root, char *name, char *data, bool copy_data);
 extern struct api_data *api_add_const(struct api_data *root, char *name, const char *data, bool copy_data);
 extern struct api_data *api_add_uint8(struct api_data *root, char *name, uint8_t *data, bool copy_data);
+extern struct api_data *api_add_short(struct api_data *root, char *name, short *data, bool copy_data);
 extern struct api_data *api_add_int16(struct api_data *root, char *name, uint16_t *data, bool copy_data);
 extern struct api_data *api_add_uint16(struct api_data *root, char *name, uint16_t *data, bool copy_data);
 extern struct api_data *api_add_int(struct api_data *root, char *name, int *data, bool copy_data);
@@ -1572,6 +1594,7 @@ extern struct api_data *api_add_bool(struct api_data *root, char *name, bool *da
 extern struct api_data *api_add_timeval(struct api_data *root, char *name, struct timeval *data, bool copy_data);
 extern struct api_data *api_add_time(struct api_data *root, char *name, time_t *data, bool copy_data);
 extern struct api_data *api_add_mhs(struct api_data *root, char *name, double *data, bool copy_data);
+extern struct api_data *api_add_khs(struct api_data *root, char *name, double *data, bool copy_data);
 extern struct api_data *api_add_mhstotal(struct api_data *root, char *name, double *data, bool copy_data);
 extern struct api_data *api_add_temp(struct api_data *root, char *name, float *data, bool copy_data);
 extern struct api_data *api_add_utility(struct api_data *root, char *name, double *data, bool copy_data);

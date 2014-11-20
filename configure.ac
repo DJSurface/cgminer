@@ -119,6 +119,17 @@ if test "x$has_winpthread" != xtrue; then
         PTHREAD_LIBS=-lpthread
 fi
 
+scrypt="no"
+
+AC_ARG_ENABLE([scrypt],
+	[AC_HELP_STRING([--enable-scrypt],[Compile support for scrypt mining (default disabled)])],
+	[scrypt=$enableval]
+	)
+if test "x$scrypt" = xyes; then
+	AC_DEFINE([USE_SCRYPT], [1], [Defined to 1 if scrypt support is wanted])
+fi
+AM_CONDITIONAL([HAS_SCRYPT], [test x$scrypt = xyes])
+
 # Drivers that are designed to be run on dedicated hardware should set standalone to yes
 # All drivers should prepend an x to the drivercount
 
@@ -405,6 +416,33 @@ fi
 AM_CONDITIONAL([HAS_SP30], [test x$sp30 = xyes])
 
 
+gridseed="no"
+
+AC_ARG_ENABLE([gridseed],
+	[AC_HELP_STRING([--enable-gridseed],[Compile support for GridSeed (default disabled)])],
+	[gridseed=$enableval]
+	)
+if test "x$gridseed" = xyes; then
+	AC_DEFINE([USE_FPGA_SERIAL], [1], [Defined to 1 if serial support required])
+	AC_DEFINE([USE_GRIDSEED], [1], [Defined to 1 if GridSeed support is wanted])
+	drivercount=x$drivercount
+fi
+AM_CONDITIONAL([HAS_GRIDSEED], [test x$gridseed = xyes])
+
+
+
+zeus="no"
+
+AC_ARG_ENABLE([zeus],
+	[AC_HELP_STRING([--enable-zeus],[Compile support for Zeusminer (default disabled) (EXPERIMENTAL)])],
+	[zeus=$enableval]
+	)
+if test "x$zeus" = xyes; then
+	AC_DEFINE([USE_FPGA_SERIAL], [1], [Defined to 1 if serial support required])
+	AC_DEFINE([USE_ZEUS], [1], [Defined to 1 if Zeus support is wanted])
+	drivercount=x$drivercount
+fi
+AM_CONDITIONAL([HAS_ZEUS], [test x$zeus = xyes])
 curses="auto"
 
 AC_ARG_WITH([curses],
@@ -431,7 +469,7 @@ fi
 
 
 #Add a new device to this list if it needs libusb, along with a no on the end.
-if test x$avalon$avalon2$bitforce$bitfury$blockerupter$modminer$bflsc$icarus$hashfast$hashratio$klondike$drillbit$cointerra$ants1$ants2 != xnonononononononononononononono; then
+if test x$avalon$avalon2$bitforce$bitfury$blockerupter$modminer$bflsc$icarus$hashfast$hashratio$klondike$drillbit$cointerra$ants1$ants2$gridseed$zeus != xnonononononononononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
@@ -443,13 +481,19 @@ else
 	want_libbitfury=false
 fi
 
+if test x$gridseed$zeus != xnono; then
+	want_libudev=true
+else
+	want_libudev=false
+fi
+
 if test x$avalon2$hashratio != xnono; then
 	want_crc16=true
 else
 	want_crc16=false
 fi
 
-AM_CONDITIONAL([NEED_FPGAUTILS], [test x$modminer != xno])
+AM_CONDITIONAL([NEED_FPGAUTILS], [test x$modminer$gridseed$zeus  != xnonono])
 AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
 AM_CONDITIONAL([WANT_LIBBITFURY], [test x$want_libbitfury != xfalse])
 AM_CONDITIONAL([HAVE_CURSES], [test x$curses = xyes])
@@ -498,6 +542,15 @@ else
 	LIBUSB_LIBS=""
 fi
 
+if test "x$want_libudev" != xfalse; then
+	if test "x$have_linux" = "xtrue"; then
+		AC_DEFINE([HAVE_LIBUDEV], [1], [Defined to 1 if udev support available])
+		LIBUDEV_LIBS="-ludev"
+	fi
+else
+	LIBUDEV_LIBS=""
+fi
+
 AM_CONDITIONAL([WANT_STATIC_LIBUSB], [test x$dlibusb = xno])
 
 AC_CONFIG_SUBDIRS([compat/jansson-2.6])
@@ -517,6 +570,8 @@ fi
 
 AC_SUBST(LIBUSB_LIBS)
 AC_SUBST(LIBUSB_CFLAGS)
+
+AC_SUBST(LIBUDEV_LIBS)
 
 AC_ARG_ENABLE([libcurl],
 	[AC_HELP_STRING([--disable-libcurl],[Disable building with libcurl for getwork and GBT support])],
@@ -623,6 +678,12 @@ fi
 
 echo "  curses.TUI...........: $cursesmsg"
 
+
+if test "x$scrypt" != xno; then
+	echo "  scrypt...............: Enabled"
+else
+	echo "  scrypt...............: Disabled"
+fi
 
 echo
 if test "x$ants1" = xyes; then
@@ -753,8 +814,20 @@ else
 	echo "  ModMiner.FPGAs.......: Disabled"
 fi
 
+if test "x$gridseed" = xyes; then
+	echo "  GridSeed.ASICs.......: Enabled"
+else
+	echo "  GridSeed.ASICs.......: Disabled"
+fi
+
+if test "x$zeus" = xyes; then
+	echo "  Zeus.ASICs...........: Enabled"
+else
+	echo "  Zeus.ASICs...........: Disabled"
+fi
+
 #Add any new device to this, along with a no on the end of the test
-if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$blockerupter$hashfast$hashratio$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$sp10$sp30" = xnonononononononononononononononononononono; then
+if test "x$avalon$avalon2$bab$bflsc$bitforce$bitfury$blockerupter$hashfast$hashratio$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$sp10$sp30$gridseed$zeus" = xnonononononononononononononononononononononono; then
 	AC_MSG_ERROR([No mining devices configured in])
 fi
 
@@ -769,7 +842,7 @@ echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS $PTHREAD_FLAGS"
-echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS $RT_LIBS"
+echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS $LIBUDEV_LIBS $RT_LIBS"
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"
